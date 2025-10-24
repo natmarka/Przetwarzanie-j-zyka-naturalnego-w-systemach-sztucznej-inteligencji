@@ -2,6 +2,8 @@ import gzip
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.stats import linregress
+import networkx as nx
 
 # --- USTAWIENIA ---
 nazwa_pliku_gz = 'lemma-WITHOUTnumberssymbols-frequencies-paisa.txt.gz'
@@ -74,5 +76,102 @@ def stworz_wykres_zipfa(nazwa_pliku, limit):
     except Exception as e:
         print(f"Wystąpił błąd: {e}")
 
+    # Regresja liniowa log-log
+    slope, intercept, r_value, p_value, std_err = linregress(log_rangi, log_czestosci)
+
+    print(f"\nWspółczynnik nachylenia (s): {slope:.3f}")
+    print(f"Współczynnik determinacji R²: {r_value**2:.4f}")
+
+    # Dodaj linię regresji do wykresu
+    plt.plot(log_rangi, intercept + slope * log_rangi, color='red', linewidth=1.5, label=f'Nachylenie = {slope:.2f}')
+    plt.legend()
+
 
 stworz_wykres_zipfa(nazwa_pliku_gz, ile_wyrazow_do_wykresu)
+
+
+def znajdz_slowa_90proc(nazwa_pliku):
+    slowa = []
+    czestosci = []
+
+    with gzip.open(nazwa_pliku, 'rt', encoding='utf-8') as f:
+        for linia in f:
+            if not linia.strip() or linia.startswith('#'):
+                continue
+            czesci = linia.split(',')
+            if len(czesci) == 2:
+                slowo, freq = czesci
+                try:
+                    czestosc = int(freq)
+                    slowa.append(slowo)
+                    czestosci.append(czestosc)
+                except ValueError:
+                    continue
+
+    suma = sum(czestosci)
+    prog = 0.9 * suma
+
+    suma_biezaca = 0
+    indeks = 0
+    while suma_biezaca < prog and indeks < len(czestosci):
+        suma_biezaca += czestosci[indeks]
+        indeks += 1
+
+    print(f"\nLiczba słów potrzebnych do pokrycia 90% języka: {indeks}")
+    print(f"Przykładowe najczęstsze słowa: {slowa[:20]}")
+
+    return slowa[:indeks]
+
+znajdz_slowa_90proc(nazwa_pliku_gz)
+
+
+
+def stworz_graf_korelacji(nazwa_pliku, limit=2000):
+    """
+    Tworzy graf współwystępowania słów na podstawie danych korpusu.
+    Pomija linie z metadanymi i linkami.
+    """
+    G = nx.Graph()
+    poprzedni = None  # 🔹 inicjalizacja zmiennej przed pętlą
+
+    with gzip.open(nazwa_pliku, 'rt', encoding='utf-8') as f:
+        for i, linia in enumerate(f):
+            if i > limit:
+                break
+
+            linia = linia.strip()
+
+            # 🔹 Pomijamy komentarze, puste linie, linki i metadane
+            if not linia or linia.startswith('#') or 'http' in linia or 'www' in linia:
+                continue
+
+            czesci = linia.split(',')
+            if len(czesci) != 2:
+                continue
+
+            slowo, freq = czesci
+            slowo = slowo.strip()
+
+            # 🔹 Pomijamy liczby i pojedyncze znaki
+            if not slowo.isalpha() or len(slowo) < 2:
+                continue
+
+            # 🔹 Tworzymy połączenie tylko jeśli mamy poprzednie słowo
+            if poprzedni is not None:
+                G.add_edge(poprzedni, slowo)
+
+            poprzedni = slowo  # zapamiętaj bieżące słowo jako poprzednie dla następnego kroku
+
+    print(f"Graf ma {len(G.nodes())} węzłów i {len(G.edges())} krawędzi.")
+
+    plt.close('all')
+    plt.figure(figsize=(10, 8))
+    pos = nx.spring_layout(G, k=0.5, seed=42)
+    nx.draw_networkx_nodes(G, pos, node_size=50, node_color='skyblue', alpha=0.8)
+    nx.draw_networkx_edges(G, pos, alpha=0.4)
+    nx.draw_networkx_labels(G, pos, font_size=8)
+    plt.title(f"Graf współwystępowania słów w języku włoskim dla {limit} słów", fontsize=14)
+    plt.axis("off")
+    plt.savefig("graf_wloski.png", dpi=300, bbox_inches='tight')
+
+stworz_graf_korelacji(nazwa_pliku_gz, limit=200)
